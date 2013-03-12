@@ -89,44 +89,62 @@
   (sql/with-query-results results
     [(str "SELECT EXISTS(SELECT * FROM information_schema.tables"
           " WHERE table_name = '" name "')")]
-    (boolean (Boolean. (:?column? (first results))))))
+    (do
+      (println (str "first results: " (first results)))
+      (println (boolean (Boolean. (:exists (first results)))))
+      (boolean (Boolean. (:exists (first results)))))))
 
 (defn- postgresql-select-messages
   [constraints]
-  (try (sql/with-connection postgresql-db
-         (if (postgresql-table-exists? "messages")
-           (vec (sql/with-query-results results
-                  [(str "SELECT id, akeys(attributes), avals(attributes)"
-                        " FROM messages " constraints)]
-                  (map (fn [result]
-                         (let [message (zipmap
-                                        (map keyword
-                                             (vec (.getArray (:akeys result))))
-                                        (vec (.getArray (:avals result))))
-                               message (assoc message :id (str (:id result)))
-                               message (update-in message [:timestamp]
-                                                  #(if % (Long. %) 0))]
-                           message))
-                       (into [] results))))))
-       (catch Exception e (.printStackTrace e))))
+  (do
+    (println (str "This is the println that works: " constraints))
+    (try (sql/with-connection postgresql-db
+        (do (println "weee go go")
+           (if (postgresql-table-exists? "messages")
+             (let [query (str "SELECT id, akeys(attributes), avals(attributes)"
+                             " FROM messages " constraints)]
+               (println query)
+               (vec (sql/with-query-results results
+                    [query]
+                    (do
+                      (println (str "result: " results))
+                      (map (fn [result]
+                             (let [message (zipmap
+                                            (map keyword
+                                                 (vec (.getArray (:akeys result))))
+                                            (vec (.getArray (:avals result))))
+                                   message (assoc message :id (str (:id result)))
+                                   message (update-in message [:timestamp]
+                                                      #(if % (Long. %) 0))]
+                               (println (str "message: " message))
+                               message))
+                           (into [] results)))))))))
+         (catch Exception e
+           (println e)
+           (.printStackTrace e)))))
 
 (deftype PostgreSQLStorage [] Storage
   (storage-get-messages
    [this]
-   (postgresql-select-messages (str "ORDER BY id DESC LIMIT " message-limit)))
-  
+   (do
+     (println "this println is never printed 2")
+     (postgresql-select-messages (str "ORDER BY id DESC LIMIT " message-limit))))
+
   (storage-get-messages
    [this options]
    (let [limit (or (:count options) message-limit)
          before? (not (nil? (:before options)))
-         messages (postgresql-select-messages (str "ORDER BY id DESC"
-                                                   (if (not before?)
-                                                     (str " LIMIT " limit))))
+         sql (str "ORDER BY id DESC" (if (not before?)
+                                                     (str " LIMIT " limit)))
+         messages (postgresql-select-messages sql)
          messages (filter (predicate-for-options (dissoc options :count))
                           messages)]
-     (if before?
-       (take limit messages)
-       messages)))
+     (do
+      (println (str "sql: " sql))
+      (println (str "options: " options ", limit: " limit ", before?: " before? ", messages: " messages()))
+      (if before?
+        (take limit messages)
+        messages))))
 
   (storage-add-message
    [this message]
@@ -160,8 +178,7 @@
                        (println "Using PostgreSQL storage backend.")
                        (PostgreSQLStorage.))
         (do
-          (println (string/trim "
-Using in-memory storage backend. To use a persistent backend, set the system
+          (println (string/trim "Using in-memory storage backend. To use a persistent backend, set the system
 property \"flurfunk.db\" to \"fleetdb\" or \"postgresql\"."))
           (MemoryStorage. (atom [])))))
 
